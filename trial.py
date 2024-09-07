@@ -1,90 +1,53 @@
 
-from fastapi import FastAPI, status, Depends, HTTPException, Request, Response
-from sqlalchemy.orm import Session
+from fastapi import FastAPI, status, Depends, HTTPException, Cookie, Response
+from sqlalchemy.orm import Session, sessionmaker
 from typing import List
-from sqlalchemy import MetaData, Table
+from sqlalchemy import MetaData, Table, insert, update, delete
 from sqladmin import Admin, ModelView
 from starlette.middleware.sessions import SessionMiddleware
 from database import engine, get_db     
-from schemas import UserCreate, LoginDetails, ProductCreate
-from models import User, create_user_products_table, create_tables, Product
+from schemas import UserCreate, IntegerInput, ProductCreate
+from models import User, get_user_table, create_tables, Product
 
 create_tables(["users"])
 app = FastAPI()
-app.add_middleware(SessionMiddleware, secret_key="qwerty")  
-metadata = MetaData()
-token = None
-produts_table_name = None
+product_table = None
+
+#gets the product table for a given user_id
+def get_product_table(user_id: int):
+    metadata = MetaData()
+    table_name = f'products_{user_id}'
+    
+    table_user_id = Table(
+        table_name, 
+        metadata, 
+        autoload_with=engine,  
+    )
+    
+    return table_user_id
+
+# app.add_middleware(SessionMiddleware, secret_key="qwerty")  
 
 # class UserAdmin(ModelView, model=User):
-#     column_list = [User.id, User.username, User.email, User.role]  # Fields to display
+#     column_list = [User.id, User.username, User.email, User.role] 
 
-# # Initialize SQLAdmin
 # admin = Admin(app, engine)
-# admin.add_view(UserAdmin)   
+# admin.add_view(UserAdmin) 
 
-# Create an authentication backend
-# class SQLAdminAuth(AuthenticationBackend):
-#     async def login(self, request: Request) -> bool:
-#         form = await request.form()
-#         email = form.get("email")
-#         username = form.get("username")
-        
-#         db: Session = next(get_db())
-#         user = db.query(User).filter(User.email == email).first()
-        
-#         if not user:
-#             return False
-#         if username != user.username:   
-#             return False    
-        
-#         # Set user info in session or cookies
-#         request.session.update({"user_id": user.id, "is_admin": user.is_admin})
-        
-#         return True
+# admin = Admin(app, engine, sessionmaker(bind=engine))
 
-#     async def logout(self, request: Request) -> bool:
-#         # Clear the session to log out the user
-#         request.session.clear()
-#         return True
+# # Define the admin views
+# class UserAdmin(ModelView, model=User):
+#     column_list = ['id', 'username', 'email', 'role']
+#     form_columns = ['username', 'email', 'role']
 
-#     async def authenticate(self, request: Request) -> bool:
-#         # Check if user is logged in and has admin privileges
-#         if "user_id" in request.session and request.session["is_admin"]:
-#             return True
-#         return False
+# class ProductAdmin(ModelView, model=Product):
+#     column_list = ['id', 'name', 'description', 'price', 'stock']
+#     form_columns = ['name', 'description', 'price', 'stock']
 
-
-# Initialize SQLAdmin with authentication
-
-
-class UserAdmin(ModelView, model=User):
-    column_list = [User.id, User.username, User.email, User.role]
-    column_searchable_list = [User.username, User.email]
-    column_sortable_list = [User.id]
-
-# Define a ModelView for the Product model
-class DynamicProductAdmin(ModelView, mosel=Product):
-    # This function will dynamically get the user's product table based on the login
-    def get_model(self, request: Request):
-        user_id = request.cookies.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Unauthorized")
-        
-        # Dynamically define the user's product table
-        product_table_name = f"products_{user_id}"
-        product_table = Table(product_table_name, metadata, autoload_with=request.db)
-        return product_table
-    
-    # Define columns to display in the dynamic table
-    column_list = [Product.id, Product.name, Product.description, Product.price, Product.stock]
-    column_searchable_list = [Product.name, Product.description]
-    column_sortable_list = [Product.id, Product.price]
-
-# Initialize Admin interface and register views
-admin = Admin(app, engine)
-admin.add_view(UserAdmin)
-admin.add_view(DynamicProductAdmin)
+# # Add views to admin
+# admin.add_view(UserAdmin, category="Users")
+# admin.add_view(ProductAdmin, category="Products")
 
 @app.get("/")
 def root():
@@ -93,31 +56,21 @@ def root():
 @app.post("/admin/users/", status_code=status.HTTP_201_CREATED)
 def create_user(user: UserCreate, session: Session = Depends(get_db)):  
 
-    # create an instance of the User database model
     userdb = User(username=user.username, email=user.email, role=user.role)
-
-    # add it to the session and commit it
     session.add(userdb)
     session.commit()
-
-    # grab the id given to the object from the database
     session.refresh(userdb)
     id = userdb.id  
-    ProductTable = create_user_products_table(user.id)
-    create_tables(ProductTable, i=1)
+    product_table_create = get_user_table(id)
     session.close()
     return {"message": f"Created user with id {id}"}
 
 @app.get("/admin/users/", response_model=List[UserCreate])
 def read_user_list(session: Session = Depends(get_db)):
-    # Get the user list
+    
     user_list = session.query(User).all()
     session.close()
-    
-    # Convert SQLAlchemy objects to Pydantic models
     user_list_pydantic = [UserCreate.from_orm(user) for user in user_list]
-    
-    # Return the list of users
     return user_list_pydantic
 
 @app.put("/admin/users/{user_id}")
@@ -131,15 +84,13 @@ def update_user(user_id: int, user: UserCreate, session: Session = Depends(get_d
         session.commit()
         return {"message": f"Updated user with id {user_id}"}
     else:
-        # Raise a 404 error if the user is not found
         raise HTTPException(status_code=404, detail=f"User with id {id} not found")
 
 @app.delete("/admin/users/{user_id}")
 def delete_user(user_id: int, session : Session = Depends(get_db)):
-    # get user with the given id
+    
     user_data = session.query(User).get(user_id)
 
-    # if user with given id exists, delete it from the database. Otherwise raise 404 error
     if user_data:
         session.delete(user_data)
         session.commit()
@@ -148,33 +99,91 @@ def delete_user(user_id: int, session : Session = Depends(get_db)):
     else:
         raise HTTPException(status_code=404, detail=f"user with id {id} not found")
 
-@app.post("/admin/login/")
-def login(email: str = Form(...), username: str = Form(...), session: Session = Depends(get_db)):
-    user = session.query(User).filter(User.email == email, User.username == username).first()
+@app.post("/admin/products")
+def login(integer_input: IntegerInput, response: Response, session: Session = Depends(get_db)):
+    id = integer_input.input_id
+    user = session.query(User).filter(User.id == id).first()
     
-    if user is None:
-        raise HTTPException(status_code=400, detail="Invalid email or username")
+    if user:
+        response.set_cookie(key="user_id", value=str(id))
+        return {"message": f"{id} present"}
+        # return RedirectResponse(url=f"/admin/products/{id}", status_code=302)
+
+    else:
+        raise HTTPException(status_code=404, detail="User not found")
+
+
+# Create Product for a specific user
+@app.post("/admin/products/")
+def create_product(product: ProductCreate, user_id: str = Cookie(None), session: Session = Depends(get_db)):
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="User not logged in")
+
+    product_table = get_product_table(int(user_id))
+
+    product_data = {
+        'name': product.name,
+        'description': product.description,
+        'price': product.price,
+        'stock': product.stock
+    }
+
+    insert_statement = insert(product_table).values(product_data)
+    session.execute(insert_statement)
+    session.commit()
+
+    return {"message": f"Product created"}
+
+# Read all Products for a specific user
+@app.get("/admin/products/", response_model=List[ProductCreate])
+def read_products(user_id: str = Cookie(None), session: Session = Depends(get_db)):
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="User not logged in")
     
-    user_id = user.id
-    # Store the user_id in the session or return as a token
-    response = Response({"message": "Login Successful", "user_id": user_id})
-    response.set_cookie("user_id", str(user_id))  # Store user_id in a cookie for subsequent requests
-    return response 
-
-@app.get("/admin/products")
-def get_user_products(request: Request, session: Session = Depends(get_db)):
-    user_id = request.cookies.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    # Assuming you have some mechanism to access the session and db
-    product_table_name = f'products_{user_id}'
-    product_table = Table(product_table_name, metadata, autoload_with=engine)
+    product_table = get_product_table(int(user_id))
+    
     query = session.query(product_table).all()
-    product_list_pydantic = [ProductCreate.from_orm(product) for product in query]
     session.close()
     
-    # Return the queried products
+    # Convert to Pydantic model list
+    product_list_pydantic = [ProductCreate.from_orm(user) for user in query]
+    
     return product_list_pydantic
 
+# Update a Product for a specific user
+@app.put("/admin/products/{product_id}")
+def update_product(product_id: int, product: ProductCreate, user_id: str = Cookie(None), session: Session = Depends(get_db)):
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="User not logged in")
+    
+    product_table = get_product_table(int(user_id))
+    
+    update_statement = (
+        update(product_table)
+        .where(product_table.c.id == product_id)  
+        .values(
+            name=product.name,
+            description=product.description,
+            price=product.price,
+            stock=product.stock
+        )
+    )
+    session.execute(update_statement)
+    session.commit()
 
+    return {"message": f"Product with id {product_id} updated"}
+
+
+# Delete a Product for a specific user
+@app.delete("/admin/products/{product_id}")
+def delete_product(product_id: int, user_id: str = Cookie(None), session: Session = Depends(get_db)):
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="User not logged in")
+
+    product_table = get_product_table(int(user_id))
+
+    delete_statement = delete(product_table).where(product_table.c.id == product_id)
+    session.execute(delete_statement)
+    session.commit()
+
+    return {"message": f"Product with id {product_id} deleted"}

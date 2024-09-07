@@ -26,4 +26,10 @@ class ProductCreate(BaseModel):
     class Config:
         orm_mode = True 
         from_attributes = True 
+        
+class IntegerInput(BaseModel):
+    input_id: int
+    class Config:
+        orm_mode = True 
+        from_attributes = True     
     

@@ -1,25 +1,29 @@
-from fastapi import FastAPI, Depends, HTTPException, Form, HTTPException
+from fastapi import FastAPI, Depends, HTTPException
 from sqladmin import Admin, ModelView
-from sqladmin.authentication import AuthenticationBackend
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.declarative import DeclarativeMeta
+from sqlalchemy.orm import sessionmaker
+from pydantic import BaseModel
+from database import Base, engine, get_db
 from sqlalchemy.orm import Session
-from database import engine, get_db
-from models import User     
-from schemas import LoginDetails, UserCreate
-from sqladmin.models import Base
-from sqlalchemy import select
-from pydantic import EmailStr
+from models import User
+from fastapi.responses import RedirectResponse
 
 app = FastAPI()
+admin = Admin(app, engine)
 
-# Define a login route
-@app.post("/admin/products/")
-# @app.post('/login' ,response_model=schemas.TokenSchema)
-def login(request: LoginDetails, session: Session = Depends(get_db)):
-    user = session.query(User).filter(User.email == request.email).first()
-    if user is None:
-        raise HTTPException(status_code=400, detail="Incorrect email")
-    user_id = user.id
-    if request.username != user.username:
-        raise HTTPException(status_code=404, detail="Incorrect password")
+class IntegerInput(BaseModel):
+    input_id: int
 
-    return user_id
+# Endpoint to handle integer input
+@app.post("/admin/products")
+def handle_integer_input(integer_input: IntegerInput, session: Session = Depends(get_db)):
+    id = integer_input.input_id
+    user = session.query(User).filter(User.id == id).first()
+    
+    if user:
+        return {"message": f"{id} present"}
+        # return RedirectResponse(url=f"/admin/products/{id}", status_code=302)
+
+    else:
+        raise HTTPException(status_code=404, detail="User not found")
