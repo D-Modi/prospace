@@ -12,4 +12,4 @@ login.py -> takes user id a sinput and regirects to coresponding products page
 
 
 
-trial.py -> supposed to be main.py which would have all the CRUD Apis defined for both the user and products, but unable to figure out the login page using sqladmin. Works as expected using swagger (127.0.0.1:8000/docs)
+main.py -> supposed to be main.py which would have all the CRUD Apis defined for both the user and products, but unable to figure out the login page using sqladmin. Works as expected using swagger (127.0.0.1:8000/docs)
