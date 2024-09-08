@@ -11,7 +11,6 @@ from models import User, get_user_table, create_tables, Product
 
 create_tables(["users"])
 app = FastAPI()
-product_table = None
 
 #gets the product table for a given user_id
 def get_product_table(user_id: int):
@@ -82,9 +81,10 @@ def update_user(user_id: int, user: UserCreate, session: Session = Depends(get_d
         user_data.email = user.email
         user_data.role = user.role
         session.commit()
+        session.close()
         return {"message": f"Updated user with id {user_id}"}
     else:
-        raise HTTPException(status_code=404, detail=f"User with id {id} not found")
+        raise HTTPException(status_code=404, detail=f"User with id {user_id} not found")
 
 @app.delete("/admin/users/{user_id}")
 def delete_user(user_id: int, session : Session = Depends(get_db)):
@@ -97,7 +97,7 @@ def delete_user(user_id: int, session : Session = Depends(get_db)):
         session.close()
         return {"message": f"Deleted user with id {user_id}"}
     else:
-        raise HTTPException(status_code=404, detail=f"user with id {id} not found")
+        raise HTTPException(status_code=404, detail=f"user with id {user_id} not found")
 
 @app.post("/admin/products")
 def login(integer_input: IntegerInput, response: Response, session: Session = Depends(get_db)):
@@ -131,8 +131,9 @@ def create_product(product: ProductCreate, user_id: str = Cookie(None), session:
     insert_statement = insert(product_table).values(product_data)
     session.execute(insert_statement)
     session.commit()
+    session.close()
 
-    return {"message": f"Product created"}
+    return {"message": f"Product created for user with id {user_id}"}
 
 # Read all Products for a specific user
 @app.get("/admin/products/", response_model=List[ProductCreate])
@@ -144,9 +145,7 @@ def read_products(user_id: str = Cookie(None), session: Session = Depends(get_db
     
     query = session.query(product_table).all()
     session.close()
-    
-    # Convert to Pydantic model list
-    product_list_pydantic = [ProductCreate.from_orm(user) for user in query]
+    product_list_pydantic = [ProductCreate.from_orm(product) for product in query]
     
     return product_list_pydantic
 
@@ -158,6 +157,11 @@ def update_product(product_id: int, product: ProductCreate, user_id: str = Cooki
     
     product_table = get_product_table(int(user_id))
     
+    product_query = select(product_table).where(product_table.c.id == product_id)
+    result = session.execute(product_query).fetchone()
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Product with id {product_id} not found for user {user_id}")
+
     update_statement = (
         update(product_table)
         .where(product_table.c.id == product_id)  
@@ -170,8 +174,9 @@ def update_product(product_id: int, product: ProductCreate, user_id: str = Cooki
     )
     session.execute(update_statement)
     session.commit()
+    session.close()
 
-    return {"message": f"Product with id {product_id} updated"}
+    return {"message": f"Product with id {product_id} updated for user with id {user_id}"}
 
 
 # Delete a Product for a specific user
@@ -181,9 +186,15 @@ def delete_product(product_id: int, user_id: str = Cookie(None), session: Sessio
         raise HTTPException(status_code=404, detail="User not logged in")
 
     product_table = get_product_table(int(user_id))
+    
+    product_query = select(product_table).where(product_table.c.id == product_id)
+    result = session.execute(product_query).fetchone()
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Product with id {product_id} not found for user {user_id}")
 
     delete_statement = delete(product_table).where(product_table.c.id == product_id)
     session.execute(delete_statement)
     session.commit()
+    session.close()
 
-    return {"message": f"Product with id {product_id} deleted"}
+    return {"message": f"Product with id {product_id} deleted for user with id {user_id}"}
